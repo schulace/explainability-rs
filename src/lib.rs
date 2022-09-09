@@ -33,7 +33,7 @@ impl<'a> OperationGraph<'a> {
         use OperationType::*;
         loop {
             match &op.op {
-                Sum { history, .. } => {
+                Sum { history, .. } | Other { history, .. } => {
                     for &prior in history {
                         let position = nodes.len();
                         nodes.push(prior);
@@ -86,7 +86,11 @@ where
         let n = *n;
         let variant = n.op.variant_symbol();
         let value = n.op.value();
-        let reason = n.reason.map(|r| format!(" \"{r}\"")).unwrap_or_default();
+        let reason = n
+            .reason
+            .as_ref()
+            .map(|r| format!(" \"{r}\""))
+            .unwrap_or_default();
         dot::LabelText::label(format!("{value}{variant}{reason}"))
     }
 }
@@ -105,14 +109,14 @@ where
 #[derive(Serialize, Clone)]
 pub struct Operation<'a> {
     op: OperationType<'a>,
-    reason: Option<&'a str>,
+    reason: Option<Cow<'a, str>>,
     #[serde(skip)]
     _allocator: &'a Arena<Operation<'a>>,
 }
 
 impl<'a> Debug for Operation<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(reason) = self.reason {
+        if let Some(ref reason) = self.reason {
             write!(f, "({:?}, {reason})", self.op)
         } else {
             write!(f, "{:?}", self.op)
@@ -131,7 +135,7 @@ impl<'a> Operation<'a> {
     pub fn new_with_reason(i: Num, reason: &'a str, alloc: &'a Arena<Operation<'a>>) -> Self {
         Operation {
             op: OperationType::Source { value: i },
-            reason: Some(reason),
+            reason: Some(reason.into()),
             _allocator: alloc,
         }
     }
@@ -166,7 +170,7 @@ impl<'a> Operation<'a> {
                     value: a + b,
                     history: Vec::from_iter(history.iter().copied().chain(once(foldee))),
                 },
-                reason: *reason,
+                reason: reason.clone(),
                 _allocator: self._allocator,
             }),
             // 2 sources (just numbers) put together, no reason given, not gonna derive one
@@ -214,31 +218,22 @@ impl<'a> Operation<'a> {
                         .collect(),
                     value: a + b,
                 },
-                reason: *reason,
+                reason: reason.clone(),
                 _allocator: self._allocator,
             }),
             // Sum 2 things with reasons for each, make a new sum with no reason, listing both
             // sources in the "history" since we're combining semantically different sums and
             // want to preserve the history
-            (
-                Operation {
-                    op: Sum { value: a, .. },
-                    reason: Some(_),
-                    ..
-                },
-                Operation {
-                    op: Sum { value: b, .. },
-                    reason: Some(_),
-                    ..
-                },
-            ) => self._allocator.alloc(Operation {
-                op: Sum {
-                    value: a + b,
-                    history: vec![self, other],
-                },
-                reason: None,
-                _allocator: self._allocator,
-            }),
+            (Operation { op: a, .. }, Operation { op: b, .. }) => {
+                self._allocator.alloc(Operation {
+                    op: Sum {
+                        value: a.value() + b.value(),
+                        history: vec![self, other],
+                    },
+                    reason: None,
+                    _allocator: self._allocator,
+                })
+            }
         }
     }
 }
@@ -250,16 +245,24 @@ impl<'a> Add for &'a Operation<'a> {
     }
 }
 
-type OpTuple<'a> = (&'a Operation<'a>, &'a str);
-impl<'a> Add<OpTuple<'a>> for &'a Operation<'a> {
+type OpTuple<'a, R> = (&'a Operation<'a>, R);
+impl<'a, R> Add<OpTuple<'a, R>> for &'a Operation<'a>
+where
+    R: Into<Cow<'a, str>>,
+{
     type Output = &'a Operation<'a>;
-    fn add(self, other: OpTuple<'a>) -> Self::Output {
+    fn add(self, other: OpTuple<'a, R>) -> Self::Output {
         let (other, reason) = other;
-        let reason = Some(reason);
+        let reason = Some(reason.into());
         let res = self.add_internal(other);
         res.reason = reason;
         res
     }
+}
+
+trait Operator: Debug {
+    fn symbol(&self) -> &'static str;
+    fn operate<'a>(&'a self, ops: &[&'a Operation<'a>]) -> &'a Operation;
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -271,6 +274,12 @@ enum OperationType<'a> {
         value: Num,
         history: Vec<&'a Operation<'a>>,
     },
+    Other {
+        value: Num,
+        #[serde(skip)]
+        op: &'a dyn Operator,
+        history: Vec<&'a Operation<'a>>,
+    },
 }
 
 impl<'a> OperationType<'a> {
@@ -279,6 +288,7 @@ impl<'a> OperationType<'a> {
         match self {
             Source { .. } => " ",
             Sum { .. } => " (+) ",
+            Other { op, .. } => op.symbol(),
         }
     }
 
@@ -287,6 +297,7 @@ impl<'a> OperationType<'a> {
         match self {
             Source { value, .. } => *value,
             Sum { value, .. } => *value,
+            Other { value, .. } => *value,
         }
     }
 }
@@ -309,33 +320,60 @@ mod tests {
         assert!(matches!(a_plus_b.op, Sum { .. }));
         assert!(matches!(a_plus_b.reason, None));
         let a_plus_b = &a + (&b, "b");
-        assert!(matches!(a_plus_b.reason, Some("b")));
+        assert!(matches!(&a_plus_b.reason, Some(r) if r == "b"));
         let continuing_sum = a_plus_b + &a;
         assert!(
             matches!(&continuing_sum.op, Sum { value, history } if history.len() == 3 && *value < 4.1)
         );
-        assert!(matches!(&continuing_sum.reason, Some("b")));
+        assert!(matches!(&continuing_sum.reason, Some(r) if r == "b"));
         let c = Operation::new_with_reason(3.0, "c", &arena);
         let continuing_sum = continuing_sum + &c;
         assert!(matches!(
             continuing_sum,
             Operation {
                 op: Sum { history, value, .. },
-                reason: Some("b"),
+                reason: Some(r),
                 ..
-            } if matches!(history[..], [
-                          Operation { op: Source{ .. }, reason: Some("a"), .. },
+            } if r == "b" && matches!(history[..], [
+                          Operation { op: Source{ .. }, reason: Some(r1), .. },
                           Operation { op: Source{ .. }, reason: None, .. },
-                          Operation { op: Source{ .. }, reason: Some("a"), .. },
-                          Operation { op: Source{ .. }, reason: Some("c"), .. }
-            ]) && within_point1(*value, 7.)
+                          Operation { op: Source{ .. }, reason: Some(r2), .. },
+                          Operation { op: Source{ .. }, reason: Some(r3), .. }
+            ] if r1 == "a" && r2 == "a" && r3 == "c") && within_point1(*value, 7.)
         ));
         dbg!(continuing_sum);
         println!("{}", continuing_sum.as_json());
     }
 
+    fn write_graph<'a>(op: &'a Operation<'a>) {
+        let mut file = std::fs::File::create("output.dot").unwrap();
+        let graph = op.as_graphviz();
+        file.write_all(graph.as_bytes()).unwrap();
+    }
+
     #[test]
     fn graph_render() {
+        #[derive(Debug)]
+        struct Sqrt;
+        impl Operator for Sqrt {
+            fn symbol(&self) -> &'static str {
+                " sqrt "
+            }
+            fn operate<'a>(&'a self, ops: &[&'a Operation<'a>]) -> &'a Operation {
+                let operand = ops[0];
+                operand._allocator.alloc(Operation {
+                    op: OperationType::Other {
+                        value: f32::sqrt(operand.op.value()),
+                        op: self,
+                        history: vec![operand],
+                    },
+                    reason: None,
+                    _allocator: operand._allocator,
+                })
+            }
+        }
+        let sqrt = Sqrt;
+        let sqrt: &dyn Operator = &sqrt;
         let arena = Arena::new();
         let a = Operation::new_with_reason(1.0, "a", &arena);
         let b = Operation::new(2.0, &arena);
@@ -343,11 +381,37 @@ mod tests {
         let continuing_sum = a_plus_b + &a;
         let c = Operation::new_with_reason(3.0, "c", &arena);
         let continuing_sum = continuing_sum + &c;
-        let continuing_sum = continuing_sum + continuing_sum + &c;
-        let mut file = std::fs::File::create("output.dot").unwrap();
-        let graph = continuing_sum.as_graphviz();
-        println!("{}", graph);
-        file.write_all(graph.as_bytes()).unwrap();
-        file.flush().unwrap();
+        let continuing_sum = continuing_sum + sqrt.operate(&[&c]);
+        write_graph(continuing_sum);
+    }
+
+    fn fibonacci<'a>(steps: u32, alloc: &'a Arena<Operation<'a>>) -> &'a Operation<'a> {
+        assert!(steps > 0);
+        let a = alloc.alloc(Operation::new_with_reason(0.0, "definitional", alloc));
+        if steps == 1 {
+            return a;
+        }
+        let b = alloc.alloc(Operation::new_with_reason(1.0, "definitional", alloc));
+        if steps == 2 {
+            return b;
+        }
+        let reason_step = match steps % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        };
+        fibonacci(steps - 1, alloc)
+            + (
+                fibonacci(steps - 2, alloc),
+                format!("{steps}{reason_step} recursive step"),
+            )
+    }
+
+    #[test]
+    fn test_fib() {
+        let alloc = Arena::new();
+        let result = fibonacci(7, &alloc);
+        write_graph(result);
     }
 }

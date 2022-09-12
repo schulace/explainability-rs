@@ -105,21 +105,19 @@ where
 
 impl<'a, Num> Operation<'a, Num>
 where
-    Num: 'static,
     Num: std::ops::Add + std::ops::Add<Output = Num>,
-    &'a Num: std::ops::Add<&'a Num>,
-    &'a Num: std::ops::Add + std::ops::Add<Output = Num>,
+    Num: Clone,
 {
     impl_arithmetic!(add_internal, OperationType::Sum, +, OperationType::make_sum, Num);
 }
 
 overload_operator!(std::ops::Add, Operation::add_internal, add);
-// overload_operator_commented!(
-//     std::ops::Add<(&'a Operation<'a, Num>, T)>,
-//     Operation::add_internal,
-//     add,
-//     T
-// );
+overload_operator_commented!(
+    std::ops::Add<(&'a Operation<'a, Num>, T)>,
+    Operation::add_internal,
+    add,
+    T
+);
 
 // overload_operator!(std::ops::Sub, Operation::sub_internal, sub);
 // overload_operator_commented!(

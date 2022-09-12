@@ -27,7 +27,7 @@ macro_rules! impl_arithmetic {
                     ..
                 },
             ) => self._allocator.alloc($crate::Operation {
-                op: $variant_ctor ( self_value $operator other_value,
+                op: $variant_ctor ( self_value.clone() $operator other_value.clone(),
                                  Vec::from_iter(history.iter().copied().chain(once(foldee))),
                                  ),
                 reason: reason.clone(),
@@ -44,7 +44,7 @@ macro_rules! impl_arithmetic {
                     ..
                 },
             ) => self._allocator.alloc($crate::Operation {
-                op: $variant_ctor(a $operator b, vec![self, other]),
+                op: $variant_ctor(a.clone() $operator b.clone(), vec![self, other]),
                 reason: None,
                 _allocator: self._allocator,
             }),
@@ -67,7 +67,7 @@ macro_rules! impl_arithmetic {
                     ..
                 }
             ) => self._allocator.alloc($crate::Operation {
-                op: $variant_ctor(self_value $operator other_value, hist_a
+                op: $variant_ctor(self_value.clone() $operator other_value.clone(), hist_a
                                  .iter()
                                  .copied()
                                  .chain(hist_b.iter().copied())
@@ -81,7 +81,7 @@ macro_rules! impl_arithmetic {
             // want to preserve the history
             ($crate::Operation { op: a, .. }, $crate::Operation { op: b, .. }) => {
                 self._allocator.alloc($crate::Operation {
-                    op: $variant_ctor(a.value() $operator b.value(),
+                    op: $variant_ctor(a.value().clone() $operator b.value().clone(),
                     vec![self, other],
                     ),
                     reason: None,
@@ -100,13 +100,11 @@ macro_rules! overload_operator {
         where
             Num: 'static,
             Num: $($pathpart)::+ + $($pathpart)::+<Output = Num>,
-            &'a Num: $($pathpart)::+<&'a Num>,
-            &'a Num: $($pathpart)::+ + $($pathpart)::+<Output = &'a Num>,
+            Num: Clone
         {
             type Output = &'a $crate::Operation<'a, Num>;
-            fn $traitfunc(self, _other: Self) -> Self::Output {
-                todo!()
-                // $func(self, other)
+            fn $traitfunc(self, other: Self) -> Self::Output {
+                $func(self, other)
             }
         }
     };
@@ -114,9 +112,12 @@ macro_rules! overload_operator {
 
 #[macro_export]
 macro_rules! overload_operator_commented {
-    ($trait:path, $func:path, $traitfunc:ident, $typ:tt) => {
+    ($($pathpart:ident)::+, $func:path, $traitfunc:ident, $typ:tt) => {
         impl<'a, $typ, Num> $trait for &'a $crate::Operation<'a, Num>
         where
+            Num: 'static,
+            Num: $($pathpart)::+ + $($pathpart)::+<Output = Num>,
+            Num: Clone
             $typ: Into<Cow<'a, str>>,
         {
             type Output = &'a $crate::Operation<'a, Num>;

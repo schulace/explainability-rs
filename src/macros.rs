@@ -7,8 +7,8 @@ macro_rules! match_unordered {
 
 #[macro_export]
 macro_rules! impl_arithmetic {
-    ($fname:tt, $OpVariant:path, $operator:tt, $variant_ctor:path) => {
-        fn $fname(&'a self, other: &'a $crate::Operation<'a>) -> &'a mut Self {
+    ($fname:tt, $OpVariant:path, $operator:tt, $variant_ctor:path, $Num:path) => {
+        fn $fname(&'a self, other: &'a $crate::Operation<'a, $Num>) -> &'a mut Self {
             use $crate::OperationType::Source;
             let self_value = self.value();
             let other_value = other.value();
@@ -95,9 +95,15 @@ macro_rules! impl_arithmetic {
 
 #[macro_export]
 macro_rules! overload_operator {
-    ($trait:path, $func:path, $traitfunc:ident) => {
-        impl<'a> $trait for &'a $crate::Operation<'a> {
-            type Output = &'a $crate::Operation<'a>;
+    ($trait:ty, $func:path, $traitfunc:ident) => {
+        impl<'a, Num> $trait for &'a $crate::Operation<'a, Num>
+        where
+            Num: 'static,
+            Num: $trait<Output = Num>,
+            &'a Num: $trait,
+            &'a Num: $trait<Output = Num>,
+        {
+            type Output = &'a $crate::Operation<'a, Num>;
             fn $traitfunc(self, other: Self) -> Self::Output {
                 $func(self, other)
             }
@@ -108,12 +114,12 @@ macro_rules! overload_operator {
 #[macro_export]
 macro_rules! overload_operator_commented {
     ($trait:path, $func:path, $traitfunc:ident, $typ:tt) => {
-        impl<'a, $typ> $trait for &'a $crate::Operation<'a>
+        impl<'a, $typ, Num> $trait for &'a $crate::Operation<'a, Num>
         where
             $typ: Into<Cow<'a, str>>,
         {
-            type Output = &'a $crate::Operation<'a>;
-            fn $traitfunc(self, other: $crate::OpTuple<'a, $typ>) -> Self::Output {
+            type Output = &'a $crate::Operation<'a, Num>;
+            fn $traitfunc(self, other: $crate::OpTuple<'a, Num, $typ>) -> Self::Output {
                 let (other, reason) = other;
                 let reason = Some(reason.into());
                 let res = $func(self, other);

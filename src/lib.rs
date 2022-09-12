@@ -72,6 +72,11 @@ impl<'a> Operation<'a> {
             |i, reason| Operation::new_with_reason(i, reason, arena),
         )
     }
+
+    pub fn value(&'a self) -> Num {
+        self.op.value()
+    }
+
     pub fn new(i: Num, arena: &'a OpArena<'a>) -> &'a Self {
         arena.alloc(Operation {
             op: OperationType::Source { value: i },

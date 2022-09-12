@@ -142,3 +142,13 @@ fn chained_add() {
         .fold(Operation::new(0., &alloc), |acc, x| acc + x);
     dbg!(web_graph(chain_sum));
 }
+
+#[test]
+fn non_commutative() {
+    let alloc = Arena::new();
+    let (op, _) = Operation::make_ctors(&alloc);
+    let a = op(6.) / op(3.);
+    assert_eq!(a.value(), 6. / 3.);
+    let c = a / op(3.);
+    assert_eq!(c.value(), 6. / 3. / 3.);
+}

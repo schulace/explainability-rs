@@ -10,22 +10,24 @@ macro_rules! impl_arithmetic {
     ($fname:tt, $OpVariant:path, $operator:tt, $variant_ctor:path) => {
         fn $fname(&'a self, other: &'a $crate::Operation<'a>) -> &'a mut Self {
             use $crate::OperationType::Source;
+            let self_value = self.value();
+            let other_value = other.value();
         match (self, other) {
             // $OpVariant $operator Source
             // happy path: we have a summed one and we fold 1 more into it, tack it on, keep the
             // sum's reason
             match_unordered!(
                 foldee @ $crate::Operation {
-                    op: Source { value: a },
+                    op: Source { .. },
                     ..
                 },
                 $crate::Operation {
-                    op: $OpVariant { value: b, history },
+                    op: $OpVariant { history, .. },
                     reason,
                     ..
                 },
             ) => self._allocator.alloc($crate::Operation {
-                op: $variant_ctor ( a $operator b,
+                op: $variant_ctor ( self_value $operator other_value,
                                  Vec::from_iter(history.iter().copied().chain(once(foldee))),
                                  ),
                 reason: reason.clone(),
@@ -50,22 +52,22 @@ macro_rules! impl_arithmetic {
             match_unordered!(
                 $crate::Operation {
                     op: $OpVariant {
-                        value: a,
                         history: hist_a,
+                        ..
                     },
                     reason,
                     ..
                 },
                 $crate::Operation {
                     op: $OpVariant {
-                        value: b,
                         history: hist_b,
+                        ..
                     },
                     reason: None,
                     ..
                 }
             ) => self._allocator.alloc($crate::Operation {
-                op: $variant_ctor(a $operator b, hist_a
+                op: $variant_ctor(self_value $operator other_value, hist_a
                                  .iter()
                                  .copied()
                                  .chain(hist_b.iter().copied())

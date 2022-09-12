@@ -5,7 +5,6 @@
 //! building a compute graph in the background.
 
 use derivative::Derivative;
-use serde::Serialize;
 use std::{borrow::Cow, fmt::Debug, iter::once};
 
 mod macros;
@@ -115,12 +114,12 @@ where
 }
 
 overload_operator!(std::ops::Add, Operation::add_internal, add);
-overload_operator_commented!(
-    std::ops::Add<(&'a Operation<'a, Num>, T)>,
-    Operation::add_internal,
-    add,
-    T
-);
+// overload_operator_commented!(
+//     std::ops::Add<(&'a Operation<'a, Num>, T)>,
+//     Operation::add_internal,
+//     add,
+//     T
+// );
 
 // overload_operator!(std::ops::Sub, Operation::sub_internal, sub);
 // overload_operator_commented!(

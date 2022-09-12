@@ -95,17 +95,18 @@ macro_rules! impl_arithmetic {
 
 #[macro_export]
 macro_rules! overload_operator {
-    ($trait:ty, $func:path, $traitfunc:ident) => {
-        impl<'a, Num> $trait for &'a $crate::Operation<'a, Num>
+    ($($pathpart:ident)::+, $func:path, $traitfunc:ident) => {
+        impl<'a, Num> $($pathpart)::+ for &'a $crate::Operation<'a, Num>
         where
             Num: 'static,
-            Num: $trait<Output = Num>,
-            &'a Num: $trait,
-            &'a Num: $trait<Output = Num>,
+            Num: $($pathpart)::+ + $($pathpart)::+<Output = Num>,
+            &'a Num: $($pathpart)::+<&'a Num>,
+            &'a Num: $($pathpart)::+ + $($pathpart)::+<Output = &'a Num>,
         {
             type Output = &'a $crate::Operation<'a, Num>;
-            fn $traitfunc(self, other: Self) -> Self::Output {
-                $func(self, other)
+            fn $traitfunc(self, _other: Self) -> Self::Output {
+                todo!()
+                // $func(self, other)
             }
         }
     };

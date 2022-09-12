@@ -45,13 +45,13 @@ fn test_sum_reasons() {
 fn write_graph<'a>(op: &'a Operation<'a>, file: impl Into<Option<&'static str>>) {
     let filename = file.into().unwrap_or("output.dot");
     let mut file = std::fs::File::create(filename).unwrap();
-    let graph = op.as_graphviz();
+    let graph = op.as_graphviz(crate::visualization::GraphDirection::DataFlow);
     use std::io::Write;
     file.write_all(graph.as_bytes()).unwrap();
 }
 
 fn web_graph<'a>(op: &'a Operation<'a>) -> String {
-    let graph = op.as_graphviz();
+    let graph = op.as_graphviz(crate::visualization::GraphDirection::DataFlow);
     let query = urlencoding::encode(&graph);
     format!("https://dreampuf.github.io/GraphvizOnline/#{query}")
 }

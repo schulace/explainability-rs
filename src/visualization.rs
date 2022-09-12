@@ -5,6 +5,12 @@ use dot::{Edges, GraphWalk, Labeller, Nodes};
 use crate::Operation;
 use crate::OperationType;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GraphDirection {
+    Pointers,
+    DataFlow,
+}
+
 #[derive(Default)]
 pub struct OperationGraph<'a> {
     nodes: Vec<&'a Operation<'a>>,
@@ -12,7 +18,10 @@ pub struct OperationGraph<'a> {
 }
 
 impl<'a> OperationGraph<'a> {
-    pub(crate) fn from_op(mut op: &'a Operation<'a>) -> OperationGraph<'a> {
+    pub(crate) fn from_op(
+        mut op: &'a Operation<'a>,
+        direction: GraphDirection,
+    ) -> OperationGraph<'a> {
         let mut nodes = Vec::with_capacity(op._allocator.len());
         nodes.push(op);
         let mut edges = Vec::with_capacity(op._allocator.len());
@@ -33,7 +42,11 @@ impl<'a> OperationGraph<'a> {
                                 nodes.len() - 1
                             });
                         // edges are in data feed direction
-                        edges.push((position, current_parent));
+                        edges.push(if direction == GraphDirection::DataFlow {
+                            (position, current_parent)
+                        } else {
+                            (current_parent, position)
+                        });
                     }
                 }
             };

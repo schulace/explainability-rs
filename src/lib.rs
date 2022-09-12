@@ -16,15 +16,17 @@ mod macros;
 mod testing;
 mod visualization;
 
+use visualization::GraphDirection;
+
 pub(crate) type OpTuple<'a, R> = (&'a Operation<'a>, R);
 type History<'a> = Vec<&'a Operation<'a>>;
-type OpArena<'a> = typed_arena::Arena<Operation<'a>>;
+pub type OpArena<'a> = typed_arena::Arena<Operation<'a>>;
 
 /// The base arithmetic tracking type. Doing math on this builds a data flow tree in the
 /// background, which can be optionally be annotated with explanations or `reason`s as this crate
 /// calls them
 /// ```
-///# use crate::*;
+///# use explainability_rs::{Operation, OpArena};
 /// let arena = OpArena::new();
 /// let (op, op_r) = Operation::make_ctors(&arena);
 /// let one = op(1.0);
@@ -53,7 +55,7 @@ pub struct Operation<'a> {
     reason: Option<Cow<'a, str>>,
     #[serde(skip)]
     #[derivative(Debug = "ignore")]
-    _allocator: &'a OpArena<'a>,
+    pub _allocator: &'a OpArena<'a>,
 }
 
 impl<'a> Operation<'a> {
@@ -62,17 +64,19 @@ impl<'a> Operation<'a> {
     /// convenience, so that the user doesn't need to pass the arena to a function each time they
     /// make a new operation.
     pub fn make_ctors(
-        arena: &'a OpArena<'a>,
+        func_context: &'a OpArena<'a>,
     ) -> (
         impl Fn(Num) -> &'a Operation<'a>,
         impl Fn(Num, &'static str) -> &'a Operation<'a>,
     ) {
         (
-            |i| Operation::new(i, arena),
-            |i, reason| Operation::new_with_reason(i, reason, arena),
+            |i| Operation::new(i, func_context),
+            |i, reason| Operation::new_with_reason(i, reason, func_context),
         )
     }
 
+    /// returns the computed value at this point in the compute graph, essentially derefferencing
+    /// the operation to the number it contains.
     pub fn value(&'a self) -> Num {
         self.op.value()
     }
@@ -98,8 +102,8 @@ impl<'a> Operation<'a> {
     }
 
     /// outputs the operation and its history in dot format, which can be rendered with GraphViz
-    pub fn as_graphviz(&'a self) -> String {
-        let graph = visualization::OperationGraph::from_op(self);
+    pub fn as_graphviz(&'a self, direction: GraphDirection) -> String {
+        let graph = visualization::OperationGraph::from_op(self, direction);
         graph.to_graphviz()
     }
 
@@ -150,8 +154,12 @@ pub trait Operator: Debug {
     fn symbol(&self) -> &'static str;
     /// What the operator does to targets. sqrt's might look something like
     /// ```
-    /// let op = ops[0];
-    /// Operation::new(f32::sqrt(op.value()), op._allocator)
+    /// use explainability_rs::{Operation};
+    /// fn operate<'a>(ops: &[&'a Operation<'a>]) -> &'a Operation<'a> {
+    ///   let ops: &[&Operation<'_>] = todo!();
+    ///   let op = ops[0];
+    ///   Operation::new(f32::sqrt(op.value()), op._allocator)
+    /// }
     /// ```
     fn operate<'a>(&'a self, ops: &[&'a Operation<'a>]) -> &'a Operation;
 }
@@ -219,6 +227,18 @@ impl<'a> OperationType<'a> {
             Product { value, .. } => *value,
             Quotient { value, .. } => *value,
             Other { value, .. } => *value,
+        }
+    }
+
+    pub fn value_mut(&mut self) -> &mut Num {
+        use OperationType::*;
+        match self {
+            Source { value, .. } => value,
+            Sum { value, .. } => value,
+            Difference { value, .. } => value,
+            Product { value, .. } => value,
+            Quotient { value, .. } => value,
+            Other { value, .. } => value,
         }
     }
     fn make_sum(value: Num, history: History<'a>) -> OperationType<'a> {
